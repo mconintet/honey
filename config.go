@@ -37,8 +37,8 @@ func NewConfig() (*Config, error) {
 	flag.StringVar(&u, "un", "", "username")
 	flag.StringVar(&p, "pwd", "", "password")
 
-	flag.BoolVar(&conf.debug, "d", false, "debug")
-	flag.BoolVar(&conf.info, "i", false, "output info")
+	flag.BoolVar(&conf.debug, "d", false, "print debug informations")
+	flag.BoolVar(&conf.info, "i", false, "print info messages")
 
 	flag.Parse()
 

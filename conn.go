@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"fmt"
+	"github.com/mconintet/clicolor"
 	"io"
 	"log"
 	"math"
@@ -13,7 +15,6 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 )
 
@@ -45,9 +46,12 @@ type conn struct {
 	cbr        *bufio.Reader     // buffer reader for client conn
 	ctp        *textproto.Reader // textprotp reader for client conn
 	isConnect  bool
-	ss         *net.TCPConn
+	ss         *net.TCPConn // conn to socks5 server
 	authMethod byte
 	readBuf    *bytes.Buffer
+
+	isNcDone chan int // if nc has been closed
+	isSsDone chan int // if ss has been closed
 }
 
 func newConn(nc net.Conn, server *Server) (*conn, error) {
@@ -62,6 +66,10 @@ func newConn(nc net.Conn, server *Server) (*conn, error) {
 	c.ctp = textproto.NewReader(c.cbr)
 
 	c.readBuf = bytes.NewBuffer([]byte{})
+
+	c.isNcDone = make(chan int)
+	c.isSsDone = make(chan int)
+
 	return c, nil
 }
 
@@ -167,7 +175,7 @@ func (c *conn) processHostPort() (host string, port string, err error) {
 	if method, requestUri, _, ok = parseRequestLine(s); !ok {
 		return "", "", errors.New("invalid request line")
 	}
-	
+
 	c.info(requestUri)
 
 	if method == connect {
@@ -362,7 +370,6 @@ func (c *conn) transfer() error {
 		err  error
 		err1 error
 		err2 error
-		wg   *sync.WaitGroup
 	)
 
 	if !c.isConnect {
@@ -376,22 +383,25 @@ func (c *conn) transfer() error {
 
 	c.log("transfering")
 
-	wg = &sync.WaitGroup{}
-	wg.Add(2)
-
+	// right to left
 	go func() {
 		_, err2 = io.Copy(c.nc, c.ss)
-		wg.Done()
+		c.isSsDone <- 1
 	}()
 
+	// left to right
 	go func() {
 		_, err1 = io.Copy(c.ss, c.nc)
-		wg.Done()
+		c.isNcDone <- 1
 	}()
 
-	wg.Wait()
+	select {
+	case <-c.isNcDone:
+		c.log(clicolor.Colorize("l2r done", "green", "black"))
+	case <-c.isSsDone:
+		c.log(clicolor.Colorize("r2l done", "green", "black"))
 
-	c.log("done")
+	}
 
 	if err1 != nil {
 		return errors.New("l2r error: " + err1.Error())
@@ -413,7 +423,7 @@ func (c *conn) close() {
 		c.ss.Close()
 	}
 
-	c.log("connect closed")
+	c.log("honey conn closed")
 }
 
 func (c *conn) serve() {
@@ -421,11 +431,12 @@ func (c *conn) serve() {
 		err error
 	)
 
-	c.log("new conn")
+	defer c.close()
+
+	c.log(clicolor.Colorize("new conn", "green", "black"))
 
 	if err = c.shakeHandWithSocks5Server(); err != nil {
 		c.log(err)
-		c.close()
 		return
 	}
 
@@ -433,13 +444,13 @@ func (c *conn) serve() {
 
 	if err = c.transfer(); err != nil {
 		c.log(err)
-		c.close()
 	}
 }
 
 func (c *conn) info(arg interface{}) {
 	if c.server.Conf.info {
-		log.Printf("info: %v", arg)
+		info := fmt.Sprintf("info: %v", arg)
+		log.Printf(clicolor.Colorize(info, "yellow", "black"))
 	}
 }
 
