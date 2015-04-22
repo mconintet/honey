@@ -3,7 +3,7 @@
 OUT_DIR="out"
 
 APP="honey"
-SRC="."
+SRC="*.go"
 
 if [ ! -d ${OUT_DIR} ]; then
 	mkdir ${OUT_DIR}
